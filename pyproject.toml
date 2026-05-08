@@ -1,0 +1,12 @@
+[project]
+name = "sdeas-evolution"
+version = "0.1.0"
+description = "Phase 6: Self-Modifying Agent"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
