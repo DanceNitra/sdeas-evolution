@@ -36,14 +36,15 @@ class SafetyGates:
             report.details.append("CORE_DOMAIN_VIOLATION: core/ files cannot be modified")
 
         # Gate 2: Syntax check
+        syntax_errors = []
         for f in files_to_modify:
             if f.endswith(".py"):
                 ok, msg = self._check_syntax(f)
                 if not ok:
-                    report.syntax_valid = False
-                    report.details.append(f"SYNTAX_ERROR in {f}: {msg}")
-        if report.syntax_valid is False:
-            pass  # already set
+                    syntax_errors.append(f"SYNTAX_ERROR in {f}: {msg}")
+        if syntax_errors:
+            report.syntax_valid = False
+            report.details.extend(syntax_errors)
         else:
             report.syntax_valid = True
 

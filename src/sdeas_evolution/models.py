@@ -32,8 +32,8 @@ class SafetyReport(BaseModel):
     type_check_output: str = ""
     test_check_passed: bool = False
     test_check_output: str = ""
-    syntax_valid: bool = False
-    no_core_modified: bool = True
+    syntax_valid: Optional[bool] = None
+    no_core_modified: Optional[bool] = True
     rollback_hash: Optional[str] = None
     passed: bool = False
     details: List[str] = Field(default_factory=list)
