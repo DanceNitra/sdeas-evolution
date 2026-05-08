@@ -127,15 +127,30 @@ class PatchGenerator:
         return f"TODO: document {name}."
 
     def _patch_todo(self, content: str, description: str) -> Optional[str]:
-        """Resolve simple TODO/FIXME comments to pass statements."""
+        """Resolve a simple TODO/FIXME comment to a pass statement.
+
+        Matches exact lines that are standalone comments (not inside strings).
+        """
         lines = content.splitlines(keepends=True)
+        # Extract the TODO text from the description (the quoted part after "Unresolved ")
+        todo_text = None
+        m = re.search(r'Unresolved "(.+?)"', description)
+        if m:
+            todo_text = m.group(1).strip()
+
         for i, line in enumerate(lines):
-            if "TODO" in line or "FIXME" in line:
-                # Only patch bare TODOs (pass stubs) in function bodies
+            # Only match actual comment lines (start with # after whitespace)
+            stripped = line.lstrip()
+            if not stripped.startswith("#"):
+                continue
+            # Must contain the specific TODO text from the description
+            if todo_text and todo_text in line:
                 indent = len(line) - len(line.lstrip())
-                stripped = line.lstrip()
-                if stripped.startswith("# TODO") or stripped.startswith("# FIXME"):
-                    # Replace comment with pass at same indent
-                    lines[i] = " " * indent + "pass  # TODO — implement\n"
-                    return "".join(lines)
+                lines[i] = " " * indent + "pass  # TODO — implement\n"
+                return "".join(lines)
+            # Fallback: generic TODO/FIXME in a comment line
+            if "TODO" in line or "FIXME" in line:
+                indent = len(line) - len(line.lstrip())
+                lines[i] = " " * indent + "pass  # TODO — implement\n"
+                return "".join(lines)
         return None
