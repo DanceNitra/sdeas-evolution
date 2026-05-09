@@ -9,6 +9,7 @@ from sdeas_evolution import EvolutionOrchestrator, ChangeType
 
 
 def main() -> None:
+    """TODO: document main."""
     p = argparse.ArgumentParser(description="SDEAS Phase 6: Self-Modifying Agent")
     p.add_argument("--repo", type=Path, default=Path.cwd(), help="Target repository")
     p.add_argument("--dry-run", action="store_true", help="Show proposals without applying")
