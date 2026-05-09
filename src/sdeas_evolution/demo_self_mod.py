@@ -2,5 +2,5 @@
 
 def calculate_variance(data):
     """TODO: document calculate_variance — args: data."""
-    # TODO: implement variance calculation
+    pass  # TODO — implement
     pass
