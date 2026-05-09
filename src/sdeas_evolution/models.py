@@ -1,4 +1,4 @@
-"""Phase 6: Self-Modifying Agent — data models."""
+"""Phase 6: Self-Modifying Agent -- data models."""
 from __future__ import annotations
 from datetime import datetime
 from enum import Enum
@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 
 class ChangeType(str, Enum):
-    """TODO: document ChangeType class."""
+    """Categories of change the agent can propose."""
     refactor = "refactor"
     feature = "feature"
     fix = "fix"
@@ -27,7 +27,7 @@ class ChangeProposal(BaseModel):
     confidence: float = 0.5  # 0.0-1.0
 
 class SafetyReport(BaseModel):
-    """Results of safety gate checks."""
+    """Results of safety gate checks with tiered risk assessment."""
     proposal_id: str
     type_check_passed: bool = False
     type_check_output: str = ""
@@ -35,6 +35,8 @@ class SafetyReport(BaseModel):
     test_check_output: str = ""
     syntax_valid: Optional[bool] = None
     no_core_modified: Optional[bool] = True
+    risk_tier: str = "unknown"  # safe, low, medium, high
+    auto_applied: bool = False
     rollback_hash: Optional[str] = None
     passed: bool = False
     details: List[str] = Field(default_factory=list)
@@ -45,6 +47,7 @@ class EvolutionResult(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     proposals_generated: int = 0
     proposals_applied: int = 0
+    proposals_needing_approval: int = 0
     proposals_rejected: int = 0
     safety_passed: int = 0
     safety_failed: int = 0

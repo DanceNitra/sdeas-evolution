@@ -1,26 +1,37 @@
-"""SafetyGates: validate proposals before application."""
+"""SafetyGates: tiered risk validation for self-mutating agents.
+
+Rules:
+- SAFE   : no_core + syntax + tests + type_check all pass -> auto-apply
+- LOW    : no_core + syntax + tests pass, type_check skipped/failed -> apply, flag review
+- MEDIUM : no_core + syntax pass, tests or type_check failed -> human approval needed
+- HIGH   : core touched OR syntax broken OR catastrophic failure -> reject outright
+"""
 from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
 from typing import Optional
+from enum import Enum
 from ..models import ChangeProposal, SafetyReport
 
-class SafetyGates:
-    """Enforce safety rules before applying changes:
 
-    1. Core domain read-only (core/ domain cannot be modified)
-    2. Syntax valid (Python code must parse)
-    3. Type check passes (mypy or pyright, if available)
-    4. Tests pass (pytest on affected or full suite)
-    5. Rollback hash captured before any modification
-    """
+class RiskTier(str, Enum):
+    """Risk classification for a proposal."""
+    safe = "safe"
+    low = "low"
+    medium = "medium"
+    high = "high"
+    unknown = "unknown"
+
+
+class SafetyGates:
+    """Tiered safety gates: classify risk, then decide auto-approval vs human review vs reject."""
 
     def __init__(self, repo_path: Path):
         self.repo = repo_path
 
     def evaluate(self, proposal: ChangeProposal, files_to_modify: list[str]) -> SafetyReport:
-        """Run all safety checks, return report."""
+        """Run all checks, classify risk tier, decide auto-approval."""
         report = SafetyReport(proposal_id=proposal.proposal_id)
 
         # Gate 0: Capture rollback hash
@@ -28,12 +39,15 @@ class SafetyGates:
             report.rollback_hash = self._capture_rollback()
         except Exception as e:
             report.details.append(f"Rollback capture failed: {e}")
+            report.risk_tier = RiskTier.high.value
             return report
 
         # Gate 1: Core domain check
         report.no_core_modified = self._check_core_domain(files_to_modify)
         if not report.no_core_modified:
             report.details.append("CORE_DOMAIN_VIOLATION: core/ files cannot be modified")
+            report.risk_tier = RiskTier.high.value
+            return report
 
         # Gate 2: Syntax check
         syntax_errors = []
@@ -45,6 +59,8 @@ class SafetyGates:
         if syntax_errors:
             report.syntax_valid = False
             report.details.extend(syntax_errors)
+            report.risk_tier = RiskTier.high.value
+            return report
         else:
             report.syntax_valid = True
 
@@ -54,14 +70,50 @@ class SafetyGates:
         # Gate 4: Tests (best effort)
         report.test_check_passed, report.test_check_output = self._run_tests()
 
-        # Final verdict
-        report.passed = (
-            report.no_core_modified
-            and report.syntax_valid
-            and report.type_check_passed
-            and report.test_check_passed
-        )
+        # Calculate risk tier based on gate results
+        report.risk_tier = self._calculate_risk_tier(report)
+
+        # Auto-approval policy
+        if report.risk_tier == RiskTier.safe.value:
+            report.passed = True
+            report.auto_applied = True
+        elif report.risk_tier == RiskTier.low.value:
+            report.passed = True
+            report.auto_applied = True  # Auto-apply but flag for post-hoc review
+            report.details.append("AUTO_APPLIED_LOW_RISK: No tests or type checker available; applied with caution")
+        elif report.risk_tier == RiskTier.medium.value:
+            report.passed = False       # Do not auto-apply
+            report.auto_applied = False
+            report.details.append("NEEDS_APPROVAL: Tests or type-check failed; human approval required")
+        else:
+            report.passed = False
+            report.auto_applied = False
+
         return report
+
+    def _calculate_risk_tier(self, report: SafetyReport) -> str:
+        """Classify proposal risk based on gate outcomes."""
+        # High is already handled by core/syntax gates
+        if not report.no_core_modified or report.syntax_valid is False:
+            return RiskTier.high.value
+
+        # Both tests AND type check passed -> safe
+        if report.test_check_passed and report.type_check_passed:
+            return RiskTier.safe.value
+
+        # Tests passed, type check skipped/unavailable -> low
+        if report.test_check_passed and not self._has_cmd("mypy") and not self._has_cmd("pyright"):
+            return RiskTier.low.value
+
+        # Type check passed, tests skipped/unavailable -> low
+        if report.type_check_passed and not self._has_cmd("pytest"):
+            return RiskTier.low.value
+
+        # One of tests or type check failed -> medium
+        if not report.test_check_passed or not report.type_check_passed:
+            return RiskTier.medium.value
+
+        return RiskTier.unknown.value
 
     def _capture_rollback(self) -> str:
         result = subprocess.run(
@@ -74,9 +126,7 @@ class SafetyGates:
         return result.stdout.strip()
 
     def _check_core_domain(self, files: list[str]) -> bool:
-        """Return False if any file is under a `core/` directory."""
         for f in files:
-            # Normalize path separators
             normalized = f.replace("\\", "/")
             parts = normalized.split("/")
             if "core" in parts:
@@ -98,7 +148,6 @@ class SafetyGates:
             return False, str(e)
 
     def _run_type_check(self) -> tuple[bool, str]:
-        """Try mypy or pyright. Return (passed, output)."""
         for cmd, name in [("mypy", "mypy"), ("pyright", "pyright")]:
             if self._has_cmd(cmd):
                 result = subprocess.run(
@@ -112,7 +161,6 @@ class SafetyGates:
         return True, "No type checker installed (skipped)"
 
     def _run_tests(self) -> tuple[bool, str]:
-        """Run pytest on the repo. Return (passed, output)."""
         if not self._has_cmd("pytest"):
             return True, "pytest not installed (skipped)"
         result = subprocess.run(

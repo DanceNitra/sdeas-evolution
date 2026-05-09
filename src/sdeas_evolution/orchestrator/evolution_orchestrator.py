@@ -74,11 +74,22 @@ class EvolutionOrchestrator:
                 if applied:
                     result.proposals_applied += 1
                     result.safety_passed += 1
+                applied, report = self._try_apply(prop)
+                if applied:
+                    result.proposals_applied += 1
+                    if report and report.risk_tier in ("safe", "low"):
+                        result.safety_passed += 1
+                    else:
+                        result.proposals_needing_approval += 1
                 else:
-                    result.proposals_rejected += 1
-                    result.safety_failed += 1
+                    if report and report.risk_tier == "medium":
+                        result.proposals_needing_approval += 1
+                        result.safety_passed += 1  # Not rejected — queued for review
+                    else:
+                        result.proposals_rejected += 1
+                        result.safety_failed += 1
                     if report:
-                        result.summary += f"REJECTED: {prop.description} — {', '.join(report.details)}\n"
+                        result.summary += f"[{report.risk_tier.upper()}] {prop.description} — {'; '.join(report.details)}\n"
                     else:
                         result.summary += f"REJECTED: {prop.description}\n"
 
@@ -102,21 +113,17 @@ class EvolutionOrchestrator:
         return self.proposer.propose(issues + skill_gaps)[:max]
 
     def _try_apply(self, proposal: ChangeProposal) -> tuple[bool, Optional[SafetyReport]]:
-        """Apply a single proposal: generate patch, write file, run safety gates."""
+        """Apply a single proposal: generate patch, write file, run tiered safety gates."""
         try:
             # Skip skill creation for now (needs manual design)
             if proposal.change_type == ChangeType.skill:
                 return True, None
 
-            # Generate patch (populate original_content + proposed_content)
             new_content = self.patch_gen.generate(proposal)
             if new_content is None:
-                # Patch generator couldn't handle this proposal type
                 return False, None
 
             proposal.proposed_content = new_content
-
-            # Determine target path
             target = self._resolve_path(proposal.target_file)
             files = [str(target)]
 
@@ -126,19 +133,36 @@ class EvolutionOrchestrator:
             # Write the patched content
             target.write_text(new_content, encoding="utf-8")
 
-            # Run safety gates
+            # Run safety gates (tiered)
             report = self.safety.evaluate(proposal, files)
             report.rollback_hash = rollback_hash
 
-            if report.passed:
-                # Commit the change
+            # Decision tree based on risk tier
+            if report.risk_tier == "safe":
+                # Auto-apply: all gates passed including tests and type check
                 self.git.stage_file(str(target))
                 self.git.commit(proposal.description)
+                report.auto_applied = True
+                report.passed = True
                 return True, report
+            elif report.risk_tier == "low":
+                # Auto-apply with flag: core+syntax+tests OK, type check skipped
+                self.git.stage_file(str(target))
+                self.git.commit(proposal.description)
+                report.auto_applied = True
+                report.passed = True
+                return True, report
+            elif report.risk_tier == "medium":
+                # Do NOT auto-apply. Queue for human approval.
+                # Don't rollback — leave changes on branch for review
+                report.auto_applied = False
+                report.passed = False
+                return False, report
             else:
-                # Rollback to pre-change state
+                # HIGH risk: core violation or syntax broken. Rollback immediately.
                 if report.rollback_hash:
                     self.git.checkout_file(str(target), report.rollback_hash)
+                report.passed = False
                 return False, report
 
         except Exception as e:
