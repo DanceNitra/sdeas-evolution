@@ -22,9 +22,9 @@ class VaultHealthMonitor:
         self.metrics = {}
     
     def scan(self) -> dict:
-        """Single-pass scan: read all files, cache metadata."""
-        # Phase 1: read all markdown files into memory
-        paths = list(self.vault.rglob("*.md"))
+        """Single-pass scan: read vault files, skip system/hermes mirrors."""
+        paths = [p for p in self.vault.rglob("*.md")
+                 if "hermes/" not in str(p) and "Session Restart Handoff" not in p.name]
         total = len(paths)
         
         self.metrics = {
