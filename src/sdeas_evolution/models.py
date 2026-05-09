@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 
 class ChangeType(str, Enum):
+    """TODO: document ChangeType class."""
     refactor = "refactor"
     feature = "feature"
     fix = "fix"
