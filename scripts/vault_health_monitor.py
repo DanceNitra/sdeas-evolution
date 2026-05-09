@@ -14,7 +14,7 @@ class VaultHealthMonitor:
 
     LINK_RE = re.compile(r'\[\[([^\]|]+)(?:\|[^\]]+)?\]\]')
     ALIAS_RE = re.compile(r'^aliases:\s*\[([^\]]*)\]', re.MULTILINE)
-    STATUS_RE = re.compile(r'#?status[\s:/]+(\S+)')
+    STATUS_RE = re.compile(r'status\s*[:/]?\s*#?(seedling|sprout|grove|evergreen|gateway)')
 
     def __init__(self, vault_path: Path):
         self.vault = Path(vault_path)
@@ -88,8 +88,9 @@ class VaultHealthMonitor:
         if len(body.strip()) < 20:
             self.metrics["empty_files"] += 1
         
-        # Status detection
-        status = self.STATUS_RE.search(content)
+        # Status detection (only in frontmatter: first 10 lines)
+        frontmatter = '\n'.join(content.split('\n')[:10])
+        status = self.STATUS_RE.search(frontmatter)
         status_str = status.group(1) if status else ""
         if status_str in ("seedling", "sprout"):
             self.metrics["stubs"] += 1
@@ -128,10 +129,12 @@ class VaultHealthMonitor:
             return
         
         # Weights
-        w_links = 30 * max(0, 1 - (self.metrics["broken_links"] / max(self.metrics["total_links"], 1)) * 5)
-        w_stubs = 25 * max(0, 1 - (self.metrics["stubs"] / total) * 2)
-        w_orphans = 20 * max(0, 1 - (self.metrics["orphans"] / total) * 3)
-        w_empty = 15 * max(0, 1 - (self.metrics["empty_files"] / total) * 10)
+        total_links = max(self.metrics["total_links"], 1)
+        broken_rate = self.metrics["broken_links"] / total_links
+        w_links = 30 * (1 - min(1, broken_rate * 4))
+        w_stubs = 25 * max(0, 1 - (self.metrics["stubs"] / total) * 1.5)  # Reduced penalty: stubs are intentional
+        w_orphans = 20 * (1 - min(1, (self.metrics["orphans"] / total) * 1.5))  # Softer
+        w_empty = 15 * max(0, 1 - (self.metrics["empty_files"] / total) * 5)  # Softer
         w_evergreen = 10 * ((self.metrics["evergreens"] + self.metrics["gateways"]) / total)
         
         score = w_links + w_stubs + w_orphans + w_empty + w_evergreen
