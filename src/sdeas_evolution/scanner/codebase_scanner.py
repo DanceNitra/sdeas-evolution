@@ -23,7 +23,9 @@ class CodebaseScanner:
         """Return a list of improvement opportunities."""
         results: List[Dict[str, Any]] = []
         for py_file in self.root.rglob("*.py"):
-            if "__pycache__" in str(py_file) or ".venv" in str(py_file):
+            # Skip cache, venv, and test directories
+            if ("__pycache__" in str(py_file) or ".venv" in str(py_file)
+                    or py_file.parts[0] == "tests"):
                 continue
             results.extend(self._scan_file(py_file))
         return results
@@ -35,9 +37,9 @@ class CodebaseScanner:
         except Exception:
             return issues
 
-        # 1. TODO/FIXME comments
+        # 1. TODO/FIXME comments (only standalone comment lines: # TODO, # FIXME, # XXX)
         for num, line in enumerate(text.splitlines(), 1):
-            if "TODO" in line or "FIXME" in line or "XXX" in line:
+            if re.match(r'^\s*#\s+(TODO|FIXME|XXX)\b', line):
                 issues.append({
                     "file": str(path.relative_to(self.root)),
                     "line": num,
